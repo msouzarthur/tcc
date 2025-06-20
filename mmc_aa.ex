@@ -2,6 +2,7 @@ require PolyHok
 
 PolyHok.defmodule MC do
   include CAS
+  include Random
 
   def mc(n_blocks, block_size, results, n_points) do
 
@@ -19,8 +20,9 @@ PolyHok.defmodule MC do
 
     idx = blockIdx.x * blockDim.x + threadIdx.x
     count = 0
-    x = 0.0
-    y = 0.2
+
+    x = atomic_random()+0.0
+    y = atomic_random()+0.0
 
     if x*x + y*y <= 1.0 do
       count = count + 1
@@ -30,7 +32,8 @@ PolyHok.defmodule MC do
   end
 
   def reduce(ref, initial, f) do
-
+    #substituir pelo ske do dot_product
+    #permite float na funcao e centraliza no phok
     {l} = PolyHok.get_shape_gnx(ref)
     type = PolyHok.get_type_gnx(ref)
     size = l
@@ -92,9 +95,11 @@ n_points = String.to_integer(arg)
 block_size = 128
 n_blocks = ceil(n_points/block_size)
 
-h_results = Nx.broadcast(Nx.tensor(0.0), {n_points})
-results = PolyHok.new_gnx(h_results)
+# h_results = Nx.broadcast(Nx.tensor(0.0), {n_points})
+# results = PolyHok.new_gnx(h_results)
+results = PolyHok.new_gnx({round(n_points)}, {:f, 32})
 
+IO.inspect(results)
 prev = System.monotonic_time()
 
 hits = MC.mc(n_blocks, block_size, results, n_points)
