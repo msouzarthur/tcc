@@ -19,48 +19,46 @@ PolyHok.defmodule MC do
   defk gpu_mc(results, n_points) do
 
     idx = blockIdx.x * blockDim.x + threadIdx.x
-    count = 0
+    count = 0.0
 
     x = atomic_random()+0.0
     y = atomic_random()+0.0
 
     if x*x + y*y <= 1.0 do
-      count = count + 1
+      count = count + 1.0
     end
 
     results[idx] = count
   end
 
   def reduce(ref, initial, f) do
-    #substituir pelo ske do dot_product
-    #permite float na funcao e centraliza no phok
+
     {l} = PolyHok.get_shape_gnx(ref)
     type = PolyHok.get_type_gnx(ref)
     size = l
-
-    result_gpu = PolyHok.new_gnx(Nx.tensor([initial], type: type))
+    result_gpu  = PolyHok.new_gnx(Nx.tensor([[initial]] , type: type))
 
     threadsPerBlock = 128
     blocksPerGrid = div(size + threadsPerBlock - 1, threadsPerBlock)
     numberOfBlocks = blocksPerGrid
     PolyHok.spawn(
-      &MC.reduce_kernel/4,
+      &MC.reduce_kernel/5,
       {numberOfBlocks,1,1},
       {threadsPerBlock,1,1},
-      [ref,result_gpu, f, size]
+      [ref,result_gpu, initial,f, size]
     )
 
     result_gpu
   end
 
-  defk reduce_kernel(a,  ref4, f,n) do
+  defk reduce_kernel(a, ref4, initial, f, n) do
 
     __shared__ cache[128]
 
     tid = threadIdx.x + blockIdx.x * blockDim.x;
     cacheIndex = threadIdx.x
 
-    temp = ref4[0]
+    temp = initial+0.0
 
     while (tid < n) do
       temp = f(a[tid], temp)
@@ -81,12 +79,13 @@ PolyHok.defmodule MC do
     i = i/2
     end
 
-    if (cacheIndex == 0) do
+  if (cacheIndex == 0) do
+    current_value = ref4[0]
+    while(!(current_value == atomic_cas(ref4, current_value, f(cache[0], current_value)))) do
       current_value = ref4[0]
-      while(!(current_value == atomic_cas(ref4,current_value,f(cache[0],current_value)))) do
-        current_value = ref4[0]
-      end
     end
+  end
+
   end
 end
 
@@ -95,15 +94,12 @@ n_points = String.to_integer(arg)
 block_size = 128
 n_blocks = ceil(n_points/block_size)
 
-# h_results = Nx.broadcast(Nx.tensor(0.0), {n_points})
-# results = PolyHok.new_gnx(h_results)
-results = PolyHok.new_gnx({round(n_points)}, {:f, 32})
+results = PolyHok.new_gnx({round(n_points)}, {:f, 64})
 
-IO.inspect(results)
 prev = System.monotonic_time()
 
 hits = MC.mc(n_blocks, block_size, results, n_points)
-  |> MC.reduce(0, PolyHok.phok fn(a, b) -> a + b end)
+  |> MC.reduce(0.0,PolyHok.phok fn (a,b) -> a + b end)
   |> PolyHok.get_gnx()
   |> Nx.squeeze()
   |> Nx.to_number()
